@@ -1,1 +1,366 @@
-4. <h1>Hello World! My website is hosted in the cloud.</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>✨ interactive constellation · hover & click</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      background: #0b0f1a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: system-ui, 'Segoe UI', monospace;
+      overflow: hidden;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      cursor: crosshair;
+      box-shadow: 0 0 40px rgba(0, 180, 255, 0.2);
+    }
+    .badge {
+      position: fixed;
+      bottom: 18px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      color: rgba(170, 210, 255, 0.7);
+      font-size: 0.9rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      pointer-events: none;
+      text-shadow: 0 0 8px rgba(0, 200, 255, 0.6);
+      backdrop-filter: blur(2px);
+      font-weight: 300;
+    }
+    .badge span {
+      background: rgba(10, 20, 30, 0.6);
+      padding: 6px 18px;
+      border-radius: 40px;
+      border: 1px solid rgba(100, 180, 255, 0.3);
+      backdrop-filter: blur(6px);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="constellationCanvas"></canvas>
+  <div class="badge"><span>hover · click · drag</span></div>
+
+  <script>
+    (function() {
+      const canvas = document.getElementById('constellationCanvas');
+      const ctx = canvas.getContext('2d');
+
+      // ---------- CONFIG ----------
+      const PARTICLE_COUNT = 160;
+      const MAX_LINK_DIST = 140;          // px, max distance for line
+      const MOUSE_RADIUS = 150;           // influence radius
+      const MOUSE_FORCE = 0.09;           // gentle attraction
+      const REPEL_STRENGTH = 2.2;         // click explosion force
+      const FRICTION = 0.985;             // velocity damping
+      const BASE_SPEED = 0.18;            // idle drift
+
+      let width, height;
+      let particles = [];
+      let mouse = { x: null, y: null, active: false };
+      let clickPulse = 0;                 // visual pulse on click
+
+      // ---------- RESIZE ----------
+      function resizeCanvas() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+        // rebuild particles on resize to fit new dimensions
+        initParticles();
+      }
+
+      // ---------- PARTICLE ----------
+      class Particle {
+        constructor() {
+          this.reset();
+        }
+
+        reset() {
+          this.x = Math.random() * width;
+          this.y = Math.random() * height;
+          // small random drift velocity
+          this.vx = (Math.random() - 0.5) * BASE_SPEED * 2;
+          this.vy = (Math.random() - 0.5) * BASE_SPEED * 2;
+          this.radius = 1.6 + Math.random() * 2.2;
+          // color variation: soft blue to cyan / purple
+          const hue = 190 + Math.random() * 50; // 190–240
+          this.color = `hsl(${hue}, 85%, 70%)`;
+          this.baseColor = this.color;
+        }
+
+        // update position, apply friction & boundaries
+        update() {
+          // apply mouse / click forces (handled globally in animate)
+          // friction
+          this.vx *= FRICTION;
+          this.vy *= FRICTION;
+
+          // tiny random jitter to keep motion alive when almost still
+          if (Math.abs(this.vx) < 0.02) this.vx += (Math.random() - 0.5) * 0.02;
+          if (Math.abs(this.vy) < 0.02) this.vy += (Math.random() - 0.5) * 0.02;
+
+          this.x += this.vx;
+          this.y += this.vy;
+
+          // boundary bouncing with soft reset (keep inside, reverse velocity)
+          if (this.x < 0) { this.x = 0; this.vx *= -0.5; }
+          if (this.x > width) { this.x = width; this.vx *= -0.5; }
+          if (this.y < 0) { this.y = 0; this.vy *= -0.5; }
+          if (this.y > height) { this.y = height; this.vy *= -0.5; }
+
+          // safety clamp
+          this.x = Math.max(0, Math.min(width, this.x));
+          this.y = Math.max(0, Math.min(height, this.y));
+        }
+
+        // draw glowing dot
+        draw(ctx) {
+          // glow effect
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius * 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = this.color + '22'; // semi-transparent glow
+          ctx.fill();
+
+          // core
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+          ctx.fillStyle = this.color;
+          ctx.shadowColor = this.color;
+          ctx.shadowBlur = 12;
+          ctx.fill();
+          ctx.shadowBlur = 0; // reset for other drawings
+        }
+      }
+
+      // ---------- INIT / RESET PARTICLES ----------
+      function initParticles() {
+        particles = [];
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          particles.push(new Particle());
+        }
+      }
+
+      // ---------- MOUSE / TOUCH HANDLING ----------
+      function handleMouseMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        // support both mouse and touch
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+        if (clientX === undefined || clientY === undefined) return;
+
+        mouse.x = clientX - rect.left;
+        mouse.y = clientY - rect.top;
+        mouse.active = true;
+      }
+
+      function handleMouseLeave() {
+        mouse.active = false;
+        mouse.x = null;
+        mouse.y = null;
+      }
+
+      // click / tap -> create an explosion / pulse
+      function handleClick(e) {
+        // prevent default on touch to avoid double events
+        if (e.type === 'touchstart') e.preventDefault();
+
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+        if (clientX === undefined || clientY === undefined) return;
+
+        const clickX = clientX - rect.left;
+        const clickY = clientY - rect.top;
+
+        // pulse visual
+        clickPulse = 1.0;
+
+        // apply explosive force to particles near click
+        for (let p of particles) {
+          const dx = p.x - clickX;
+          const dy = p.y - clickY;
+          const dist = Math.hypot(dx, dy);
+          if (dist < MOUSE_RADIUS * 1.8 && dist > 0.1) {
+            const angle = Math.atan2(dy, dx);
+            const force = REPEL_STRENGTH * (1 - dist / (MOUSE_RADIUS * 1.8));
+            p.vx += Math.cos(angle) * force * 1.5;
+            p.vy += Math.sin(angle) * force * 1.5;
+          } else if (dist <= 0.1) {
+            // if exactly on particle, push randomly
+            p.vx += (Math.random() - 0.5) * REPEL_STRENGTH * 2;
+            p.vy += (Math.random() - 0.5) * REPEL_STRENGTH * 2;
+          }
+        }
+
+        // also update mouse position on click (for touch)
+        mouse.x = clickX;
+        mouse.y = clickY;
+        mouse.active = true;
+      }
+
+      // ---------- ANIMATION LOOP ----------
+      function animate() {
+        // decay pulse
+        if (clickPulse > 0) {
+          clickPulse *= 0.94;
+          if (clickPulse < 0.01) clickPulse = 0;
+        }
+
+        // --- 1. apply mouse / click forces and update particles ---
+        for (let p of particles) {
+          // mouse attraction/repulsion if active
+          if (mouse.active && mouse.x !== null && mouse.y !== null) {
+            const dx = mouse.x - p.x;
+            const dy = mouse.y - p.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < MOUSE_RADIUS && dist > 0.5) {
+              // gentle pull toward mouse (constellation thread effect)
+              const force = MOUSE_FORCE * (1 - dist / MOUSE_RADIUS);
+              p.vx += (dx / dist) * force * 0.8;
+              p.vy += (dy / dist) * force * 0.8;
+            }
+          }
+
+          // update physics
+          p.update();
+        }
+
+        // --- 2. draw everything ---
+        ctx.clearRect(0, 0, width, height);
+
+        // draw faint background stars / vignette (optional)
+        // draw connections first (so they sit under particles)
+        ctx.lineWidth = 0.9;
+        for (let i = 0; i < particles.length; i++) {
+          const a = particles[i];
+          for (let j = i + 1; j < particles.length; j++) {
+            const b = particles[j];
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < MAX_LINK_DIST) {
+              // opacity based on distance
+              const alpha = (1 - dist / MAX_LINK_DIST) * 0.55;
+              // colour shift: brighter near mouse if mouse active
+              let lineHue = 200; // default blue
+              if (mouse.active && mouse.x !== null) {
+                const midX = (a.x + b.x) / 2;
+                const midY = (a.y + b.y) / 2;
+                const mDist = Math.hypot(midX - mouse.x, midY - mouse.y);
+                if (mDist < MOUSE_RADIUS) {
+                  lineHue = 190 + (1 - mDist / MOUSE_RADIUS) * 40; // shift toward cyan
+                }
+              }
+              ctx.strokeStyle = `hsla(${lineHue}, 90%, 70%, ${alpha})`;
+              ctx.beginPath();
+              ctx.moveTo(a.x, a.y);
+              ctx.lineTo(b.x, b.y);
+              ctx.stroke();
+            }
+          }
+        }
+
+        // draw all particles
+        for (let p of particles) {
+          p.draw(ctx);
+        }
+
+        // draw mouse aura / click pulse if active
+        if (mouse.active && mouse.x !== null && mouse.y !== null) {
+          ctx.beginPath();
+          const auraRadius = 45 + clickPulse * 60;
+          const gradient = ctx.createRadialGradient(
+            mouse.x, mouse.y, 5,
+            mouse.x, mouse.y, auraRadius
+          );
+          gradient.addColorStop(0, `rgba(100, 220, 255, ${0.2 + clickPulse * 0.3})`);
+          gradient.addColorStop(0.6, `rgba(80, 160, 255, ${0.06 + clickPulse * 0.15})`);
+          gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = gradient;
+          ctx.arc(mouse.x, mouse.y, auraRadius, 0, Math.PI * 2);
+          ctx.fill();
+
+          // tiny crosshair
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(180, 240, 255, ${0.5 + clickPulse * 0.4})`;
+          ctx.lineWidth = 1.2;
+          ctx.arc(mouse.x, mouse.y, 6, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // extra click pulse ring (disappears)
+        if (clickPulse > 0.02 && mouse.x !== null) {
+          ctx.beginPath();
+          const ringRadius = 20 + (1 - clickPulse) * 80;
+          ctx.arc(mouse.x, mouse.y, ringRadius, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(150, 230, 255, ${clickPulse * 0.7})`;
+          ctx.lineWidth = 2.5 * clickPulse;
+          ctx.stroke();
+        }
+
+        requestAnimationFrame(animate);
+      }
+
+      // ---------- EVENT LISTENERS ----------
+      function setupEvents() {
+        // mouse
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('mouseleave', handleMouseLeave);
+        canvas.addEventListener('click', handleClick);
+
+        // touch
+        canvas.addEventListener('touchmove', (e) => {
+          e.preventDefault();
+          handleMouseMove(e);
+        }, { passive: false });
+        canvas.addEventListener('touchstart', (e) => {
+          e.preventDefault();
+          handleClick(e);
+          handleMouseMove(e); // also update position
+        }, { passive: false });
+        canvas.addEventListener('touchend', (e) => {
+          e.preventDefault();
+          // keep mouse active but maybe fade? we'll keep active until touch end
+          // optional: handleMouseLeave, but then touch would lose position.
+          // better: keep active, but no new moves.
+        });
+        canvas.addEventListener('touchcancel', (e) => {
+          e.preventDefault();
+          handleMouseLeave();
+        });
+
+        // window resize
+        window.addEventListener('resize', () => {
+          resizeCanvas();
+        });
+      }
+
+      // ---------- START ----------
+      function init() {
+        resizeCanvas();       // sets width/height and creates particles
+        setupEvents();
+        animate();
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>
